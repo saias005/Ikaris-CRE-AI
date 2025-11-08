@@ -1,0 +1,1 @@
+Through Nvidia's NemoTron, comes Ikaris, AI-Powered humanoid assisting CBRE employees with decision-making based off real estate data
