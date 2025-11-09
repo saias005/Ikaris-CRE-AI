@@ -6,6 +6,9 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from pdf_processor import process_all_pdfs
 from typing import List
+import os
+import pandas as pd
+from contextlib import closing
 import warnings
 
 warnings.filterwarnings("ignore")

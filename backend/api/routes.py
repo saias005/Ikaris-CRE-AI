@@ -7,6 +7,7 @@ from langchain_community.vectorstores import Chroma
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from backend.agents.hybrid_sys import IkarisHybridSystem
 
 load_dotenv()
 
@@ -82,6 +83,10 @@ nemotron_client = OpenAI(
     api_key=os.getenv("NVIDIA_API_KEY")
 )
 
+print("🧠 Initializing IKARIS Hybrid ML system...")
+hybrid_system = IkarisHybridSystem()
+print("✅ Hybrid system ready!")
+
 print("✅ IKARIS (Nemotron) ready!")
 
 # ==================== RAG FUNCTION ====================
@@ -128,6 +133,40 @@ def query_with_ikaris(question: str, k: int = 5):
     
     # Step 3: Create user prompt
     user_prompt = f"""**Context from CBRE Documents:**
+
+    def polish_with_ikaris(question: str, raw_analysis: str) -> str:
+    """
+    Use Nemotron to rewrite/generate a well-structured answer from
+    an internal analysis string (e.g., ML output).
+    """
+    user_prompt = f"""You are IKARIS, a CRE analyst.
+
+User question:
+{question}
+
+Internal analysis (from IKARIS tools/ML models):
+{raw_analysis}
+
+Rewrite this into a clear, decision-ready answer following the IKARIS output template:
+- Executive Summary
+- Key Findings (with numbers/units)
+- Limitations & Assumptions
+- Sources (you can say 'Internal IKARIS model outputs' if there are no documents)
+- Confidence
+"""
+
+    resp = nemotron_client.chat.completions.create(
+        model="mistralai/mistral-nemotron",
+        messages=[
+            {"role": "system", "content": IKARIS_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.3,
+        max_tokens=1500
+    )e
+
+    return resp.choices[0].message.content
+    
 
 {context}
 
@@ -317,6 +356,57 @@ def list_documents():
             "unique_documents": 0,
             "documents": []
         }), 500
+    
+    @app.route('/api/hybrid_query', methods=['POST'])
+    def hybrid_query():
+        """
+        Hybrid endpoint:
+        - Classifies query (RAG vs ML)
+        - Runs either vector RAG or IKARIS ML
+        - Uses Nemotron to polish ML outputs
+        """
+        data = request.json
+        question = data.get('question')
+
+        if not question:
+            return jsonify({"error": "No question provided"}), 400
+
+        print(f"\n📝 Hybrid Query: {question}")
+
+        # 1) Let IKARIS hybrid system classify the query
+        query_type = hybrid_system.classify_query(question)
+        print(f"🔀 Routed as: {query_type}")
+
+        # 2) RAG path (same as /api/query)
+        if query_type == "rag":
+            rag_result = query_with_ikaris(question)
+            return jsonify({
+                "mode": "rag",
+                "question": question,
+                "answer": rag_result["answer"],
+                "sources": rag_result["sources"],
+                "context_chunks": rag_result.get("context_chunks", 0),
+                "model": rag_result.get("model", "IKARIS (Mistral-Nemotron)")
+            })
+
+        # 3) ML path – use your hybrid system
+        ml_result = hybrid_system.process_query(question)
+        raw_text = ml_result["response"]      # your Python-generated text
+        method = ml_result.get("method", "")
+        mtype = ml_result.get("type", "")
+
+        # 4) Ask Nemotron to rewrite it nicely
+        polished = polish_with_ikaris(question, raw_text)
+
+        return jsonify({
+            "mode": "ml",
+            "question": question,
+            "answer": polished,               # cleaned-up, IKARIS-style
+            "raw_ml_response": raw_text,      # optional: for debugging
+            "ml_type": mtype,
+            "ml_method": method,
+            "model": "IKARIS (Hybrid ML + Mistral-Nemotron)"
+        })
 
 
 if __name__ == '__main__':
