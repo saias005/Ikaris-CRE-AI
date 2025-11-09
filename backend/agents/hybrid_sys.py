@@ -325,14 +325,23 @@ class IkarisHybridSystem:
         
          # Check for conversational/chat queries FIRST
         chat_keywords = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 
-                        'how are you', 'thank you', 'thanks', 'what can you do',
-                        'help me', 'your capabilities', 'introduce yourself']
+                    'how are you', 'thank you', 'thanks', 'what can you do',
+                    'help me', 'your capabilities', 'introduce yourself']
+    
+        # Only classify as chat if it's ACTUALLY a greeting/chat message
+        # Don't include "can you" as a chat trigger since it's often used with analytical questions
+        is_chat = False
+        for keyword in chat_keywords:
+            if keyword == query_lower or query_lower.startswith(keyword + ' '):
+                is_chat = True
+                break
         
-        if any(keyword in query_lower for keyword in chat_keywords):
+        if is_chat:
             return 'chat'
-        # ML Prediction triggers
-        ml_predict_keywords = ['predict', 'forecast', 'will', 'future', 'next quarter', 
-                               'next year', 'projection', 'estimate', 'expect']
+        
+        # ML Prediction triggers - check these BEFORE defaulting to RAG
+        ml_predict_keywords = ['predict', 'forecast', 'will be', 'future', 'next quarter', 
+                            'next year', 'projection', 'estimate', 'expect', 'what will']
         
         # ML Risk triggers
         ml_risk_keywords = ['risk', 'risky', 'at risk', 'likely to', 'probability', 
@@ -340,7 +349,8 @@ class IkarisHybridSystem:
         
         # ML Optimization triggers
         ml_optimize_keywords = ['optimize', 'best', 'recommend', 'should', 'improve', 
-                               'opportunity', 'potential', 'undervalued', 'overvalued']
+                            'opportunity', 'potential', 'undervalued', 'overvalued', 
+                            'highest value', 'lowest value']
         
         # Check for ML triggers
         has_predict = any(keyword in query_lower for keyword in ml_predict_keywords)
