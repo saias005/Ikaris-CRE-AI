@@ -129,6 +129,92 @@ class IkarisHybridSystem:
         )
         self.models['value'].fit(X, y)
         self.value_features = features
+
+    def _apply_dynamic_filters(self, query: str, properties_df=None) -> tuple:
+        """
+        Apply dynamic filters based on query content
+        Returns: (filtered_dataframe, filter_description_list)
+        """
+        query_lower = query.lower()
+        
+        # Start with all properties or provided dataframe
+        filtered_props = properties_df.copy() if properties_df is not None else self.properties.copy()
+        filter_description = []
+        
+        # Dynamic location filtering - check for ANY market
+        for market in self.properties['market'].unique():
+            if market.lower() in query_lower:
+                filtered_props = filtered_props[filtered_props['market'] == market]
+                filter_description.append(f"Market: {market}")
+                break
+        
+        # Dynamic property type filtering - check for ANY type
+        for prop_type in self.properties['property_type'].unique():
+            if prop_type.lower() in query_lower:
+                filtered_props = filtered_props[filtered_props['property_type'] == prop_type]
+                filter_description.append(f"Type: {prop_type}")
+                break
+        
+        # Lease expiry filtering
+        if 'expiring' in query_lower or 'expire' in query_lower:
+            if 'next quarter' in query_lower:
+                filtered_props = filtered_props[filtered_props['walt_years'] < 0.25]
+                filter_description.append("Leases expiring next quarter")
+            elif 'next year' in query_lower:
+                filtered_props = filtered_props[filtered_props['walt_years'] < 1.0]
+                filter_description.append("Leases expiring next year")
+            else:
+                filtered_props = filtered_props[filtered_props['walt_years'] < 2.0]
+                filter_description.append("Leases expiring within 2 years")
+        
+        # Building class filtering
+        if 'class a' in query_lower:
+            filtered_props = filtered_props[filtered_props['building_class'] == 'A']
+            filter_description.append("Class A")
+        elif 'class b' in query_lower:
+            filtered_props = filtered_props[filtered_props['building_class'] == 'B']
+            filter_description.append("Class B")
+        elif 'class c' in query_lower:
+            filtered_props = filtered_props[filtered_props['building_class'] == 'C']
+            filter_description.append("Class C")
+        
+        # Energy/sustainability filtering
+        if 'leed' in query_lower:
+            filtered_props = filtered_props[filtered_props['leed_certified'] == True]
+            filter_description.append("LEED Certified")
+        
+        if 'energy efficient' in query_lower or 'low energy' in query_lower:
+            filtered_props = filtered_props[filtered_props['energy_star_score'] > 75]
+            filter_description.append("Energy Star > 75")
+        elif 'high energy' in query_lower:
+            filtered_props = filtered_props[filtered_props['energy_cost_psf'] > 3.0]
+            filter_description.append("High energy cost (>$3/sqft)")
+        
+        # Occupancy filtering
+        if 'low occupancy' in query_lower or 'vacant' in query_lower:
+            filtered_props = filtered_props[filtered_props['occupancy_rate'] < 0.8]
+            filter_description.append("Low occupancy (<80%)")
+        elif 'high occupancy' in query_lower or 'fully leased' in query_lower:
+            filtered_props = filtered_props[filtered_props['occupancy_rate'] > 0.95]
+            filter_description.append("High occupancy (>95%)")
+        
+        # Size filtering
+        if 'large' in query_lower:
+            filtered_props = filtered_props[filtered_props['total_sqft'] > 100000]
+            filter_description.append("Large (>100k sqft)")
+        elif 'small' in query_lower:
+            filtered_props = filtered_props[filtered_props['total_sqft'] < 50000]
+            filter_description.append("Small (<50k sqft)")
+        
+        # Age filtering
+        if 'new' in query_lower or 'modern' in query_lower:
+            filtered_props = filtered_props[filtered_props['building_age'] < 10]
+            filter_description.append("New buildings (<10 years)")
+        elif 'old' in query_lower or 'aging' in query_lower:
+            filtered_props = filtered_props[filtered_props['building_age'] > 30]
+            filter_description.append("Older buildings (>30 years)")
+        
+        return filtered_props, filter_description
     
     def _train_maintenance_model(self):
         """Train maintenance cost prediction model"""
@@ -281,51 +367,58 @@ class IkarisHybridSystem:
         elif query_type == 'ml_optimize':
             return self.handle_optimization_query(query)
     
-    def handle_rag_query(self, query: str) -> Dict[str, Any]:
+    def handle_rag_query(self, query: str, vectorstore=None) -> Dict[str, Any]:
         """
-        Handle factual queries with simple search
+        Handle factual queries with BOTH vector search AND CSV filtering
         """
         
-        # Parse query for filters
+        # 1. Search vector database (PDFs)
+        pdf_results = []
+        if vectorstore:
+            pdf_results = vectorstore.similarity_search(query, k=5)
+        
+        # 2. Filter CSV properties
         filters = self._parse_query_filters(query)
-        
-        # Filter properties based on query
         filtered_props = self.properties.copy()
         
+        # Apply filters
         if 'market' in filters:
-            filtered_props = filtered_props[
-                filtered_props['market'] == filters['market']
-            ]
+            filtered_props = filtered_props[filtered_props['market'] == filters['market']]
         
         if 'property_type' in filters:
-            filtered_props = filtered_props[
-                filtered_props['property_type'] == filters['property_type']
-            ]
+            filtered_props = filtered_props[filtered_props['property_type'] == filters['property_type']]
         
-        if 'high_energy' in filters:
-            filtered_props = filtered_props[
-                filtered_props['energy_cost_psf'] > 3.0
-            ]
+        # Energy cost filter
+        if 'high_energy' in filters or ('energy' in query.lower() and '$3' in query):
+            filtered_props = filtered_props[filtered_props['energy_cost_psf'] > 3.0]
         
         if 'low_occupancy' in filters:
-            filtered_props = filtered_props[
-                filtered_props['occupancy_rate'] < 0.8
-            ]
+            filtered_props = filtered_props[filtered_props['occupancy_rate'] < 0.8]
         
         if 'expiring_leases' in filters:
-            filtered_props = filtered_props[
-                filtered_props['walt_years'] < 1.0
-            ]
+            filtered_props = filtered_props[filtered_props['walt_years'] < 1.0]
         
-        # Format response
-        response = self._format_property_list(filtered_props.head(10), query)
+        # 3. Combine both sources (FIX: Don't overwrite response!)
+        response = ""
+        
+        # Add PDF results if available
+        if pdf_results:
+            response += "FROM DOCUMENTS:\n"
+            for doc in pdf_results:
+                response += f"- {doc.page_content[:200]}...\n"
+            response += "\n"
+        
+        # Add property results
+        response += "FROM PROPERTY DATABASE:\n"
+        property_list = self._format_property_list(filtered_props.head(10), query)
+        response += property_list
         
         return {
             'query': query,
             'type': 'factual',
             'response': response,
             'num_results': len(filtered_props),
-            'method': 'RAG search'
+            'method': 'Combined PDF + CSV Search'
         }
     
     def handle_prediction_query(self, query: str) -> Dict[str, Any]:
@@ -373,25 +466,40 @@ class IkarisHybridSystem:
             return self.identify_general_opportunities(query)
     
     def predict_maintenance_costs(self, query: str) -> Dict[str, Any]:
-        """Predict future maintenance costs"""
+        """Predict future maintenance costs with dynamic filtering"""
         
-        # Get predictions
-        X = self.properties[self.maintenance_features]
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'prediction',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML - Gradient Boosting',
+                'confidence': 0.0
+            }
+        
+        # Get predictions for filtered properties
+        X = filtered_props[self.maintenance_features]
         predictions = self.models['maintenance'].predict(X)
         
-        self.properties['predicted_maintenance'] = predictions
-        self.properties['maintenance_increase'] = (
-            predictions - self.properties['maintenance_annual']
+        filtered_props['predicted_maintenance'] = predictions
+        filtered_props['maintenance_increase'] = (
+            predictions - filtered_props['maintenance_annual']
         )
         
         # Find properties with highest predicted increases
-        top_increases = self.properties.nlargest(5, 'maintenance_increase')
+        top_increases = filtered_props.nlargest(min(5, len(filtered_props)), 'maintenance_increase')
         
-        response = "MAINTENANCE COST PREDICTIONS (Next Year):\n\n"
+        response = f"MAINTENANCE COST PREDICTIONS ({filter_summary}):\n\n"
+        response += f"Analyzing {len(filtered_props)} properties\n\n"
         response += "Properties with Highest Expected Maintenance Increases:\n\n"
         
         for _, prop in top_increases.iterrows():
             response += f"📍 {prop['property_name']} ({prop['market']})\n"
+            response += f"   Type: {prop['property_type']} | Class: {prop['building_class']}\n"
             response += f"   Current: ${prop['maintenance_annual']:,.0f}\n"
             response += f"   Predicted: ${prop['predicted_maintenance']:,.0f}\n"
             response += f"   Increase: ${prop['maintenance_increase']:,.0f} "
@@ -402,33 +510,48 @@ class IkarisHybridSystem:
             'query': query,
             'type': 'prediction',
             'response': response,
-            'method': 'ML - Gradient Boosting',
+            'method': 'ML - Gradient Boosting with Dynamic Filtering',
             'confidence': 0.85
         }
-    
+
     def predict_property_values(self, query: str) -> Dict[str, Any]:
-        """Predict property values and identify opportunities"""
+        """Predict property values with dynamic filtering"""
+        
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'prediction',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML - Random Forest',
+                'confidence': 0.0
+            }
         
         # Get predictions
-        X = self.properties[self.value_features]
+        X = filtered_props[self.value_features]
         predictions = self.models['value'].predict(X)
         
-        self.properties['predicted_value'] = predictions
-        self.properties['value_diff'] = predictions - self.properties['property_value']
-        self.properties['value_diff_pct'] = (
-            self.properties['value_diff'] / self.properties['property_value'] * 100
+        filtered_props['predicted_value'] = predictions
+        filtered_props['value_diff'] = predictions - filtered_props['property_value']
+        filtered_props['value_diff_pct'] = (
+            filtered_props['value_diff'] / filtered_props['property_value'] * 100
         )
         
-        # Identify under/overvalued
-        undervalued = self.properties[self.properties['value_diff_pct'] > 10]
-        overvalued = self.properties[self.properties['value_diff_pct'] < -10]
+        # Identify under/overvalued within filtered set
+        undervalued = filtered_props[filtered_props['value_diff_pct'] > 10]
+        overvalued = filtered_props[filtered_props['value_diff_pct'] < -10]
         
-        response = "PROPERTY VALUE ANALYSIS:\n\n"
+        response = f"PROPERTY VALUE ANALYSIS ({filter_summary}):\n\n"
+        response += f"Analyzed {len(filtered_props)} properties\n\n"
         
         if len(undervalued) > 0:
             response += "🟢 POTENTIALLY UNDERVALUED (Buy/Hold Opportunities):\n\n"
-            for _, prop in undervalued.nlargest(3, 'value_diff_pct').iterrows():
+            for _, prop in undervalued.nlargest(min(3, len(undervalued)), 'value_diff_pct').iterrows():
                 response += f"• {prop['property_name']} ({prop['market']})\n"
+                response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
                 response += f"  Current Value: ${prop['property_value']:,.0f}\n"
                 response += f"  Predicted Value: ${prop['predicted_value']:,.0f}\n"
                 response += f"  Upside Potential: {prop['value_diff_pct']:.1f}%\n"
@@ -437,92 +560,127 @@ class IkarisHybridSystem:
         
         if len(overvalued) > 0:
             response += "🔴 POTENTIALLY OVERVALUED (Sell/Reposition Candidates):\n\n"
-            for _, prop in overvalued.nsmallest(3, 'value_diff_pct').iterrows():
+            for _, prop in overvalued.nsmallest(min(3, len(overvalued)), 'value_diff_pct').iterrows():
                 response += f"• {prop['property_name']} ({prop['market']})\n"
                 response += f"  Current Value: ${prop['property_value']:,.0f}\n"
                 response += f"  Predicted Value: ${prop['predicted_value']:,.0f}\n"
                 response += f"  Downside Risk: {prop['value_diff_pct']:.1f}%\n\n"
         
+        if len(undervalued) == 0 and len(overvalued) == 0:
+            response += "All properties appear fairly valued based on current metrics.\n"
+        
         return {
             'query': query,
             'type': 'prediction',
             'response': response,
-            'method': 'ML - Random Forest',
+            'method': 'ML - Random Forest with Dynamic Filtering',
             'confidence': 0.88
         }
-    
+
     def assess_lease_risk(self, query: str) -> Dict[str, Any]:
-        """Assess lease renewal risks"""
-
-        X = self.properties[self.lease_features]
+        """Assess lease renewal risks with dynamic filtering"""
+        
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'risk_assessment',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML - Random Forest Classifier',
+                'confidence': 0.0
+            }
+        
+        X = filtered_props[self.lease_features]
         proba = self.models['lease_risk'].predict_proba(X)
-
-        # Robustly pick probability for class "1" (high risk)
+        
+        # Get risk probabilities
         classes = list(self.models['lease_risk'].classes_)
         if 1 in classes:
             idx_one = classes.index(1)
             risk_proba = proba[:, idx_one]
         else:
-            # No class "1" learned → treat everything as low risk
             risk_proba = np.zeros(len(X))
-
-        self.properties['lease_risk_score'] = risk_proba
-
+        
+        filtered_props['lease_risk_score'] = risk_proba
+        
         # Define risk bands
-        high_risk = self.properties[self.properties['lease_risk_score'] > 0.7]
-        medium_risk = self.properties[
-            (self.properties['lease_risk_score'] > 0.4) &
-            (self.properties['lease_risk_score'] <= 0.7)
+        high_risk = filtered_props[filtered_props['lease_risk_score'] > 0.7]
+        medium_risk = filtered_props[
+            (filtered_props['lease_risk_score'] > 0.4) &
+            (filtered_props['lease_risk_score'] <= 0.7)
         ]
-
-        response = "LEASE RENEWAL RISK ASSESSMENT:\n\n"
-
+        
+        response = f"LEASE RENEWAL RISK ASSESSMENT ({filter_summary}):\n\n"
+        response += f"Analyzed {len(filtered_props)} properties\n\n"
+        
         if len(high_risk) > 0:
             response += f"🚨 HIGH RISK PROPERTIES ({len(high_risk)} properties):\n\n"
-            for _, prop in high_risk.nlargest(5, 'lease_risk_score').iterrows():
+            for _, prop in high_risk.nlargest(min(5, len(high_risk)), 'lease_risk_score').iterrows():
                 response += f"• {prop['property_name']} ({prop['market']})\n"
+                response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
                 response += f"  Risk Score: {prop['lease_risk_score']:.1%}\n"
                 response += f"  WALT: {prop['walt_years']:.1f} years\n"
-                if 'lease_expiry_next_12mo_sqft' in prop:
-                    response += f"  Expiring Space: {prop['lease_expiry_next_12mo_sqft']:,.0f} sqft\n"
                 response += f"  Action: Immediate tenant retention efforts needed\n\n"
-
+        
         response += "\n📊 RISK SUMMARY:\n"
         response += f"• High Risk: {len(high_risk)} properties\n"
         response += f"• Medium Risk: {len(medium_risk)} properties\n"
-        if 'annual_rent' in self.properties.columns:
-            response += (
-                f"• Total at Risk: "
-                f"${high_risk['annual_rent'].sum():,.0f} in annual rent\n"
-            )
-
+        response += f"• Low Risk: {len(filtered_props) - len(high_risk) - len(medium_risk)} properties\n"
+        
+        if 'annual_rent' in filtered_props.columns and len(high_risk) > 0:
+            response += f"• Total at Risk: ${high_risk['annual_rent'].sum():,.0f} in annual rent\n"
+        
         return {
             'query': query,
             'type': 'risk_assessment',
             'response': response,
-            'method': 'ML - Random Forest Classifier',
+            'method': 'ML - Random Forest Classifier with Dynamic Filtering',
             'confidence': 0.82
         }
-    
+
     def identify_energy_opportunities(self, query: str) -> Dict[str, Any]:
-        """Identify energy efficiency opportunities"""
+        """Identify energy efficiency opportunities with dynamic filtering"""
         
-        # Properties with high energy costs and low Energy Star scores
-        opportunities = self.properties[
-            (self.properties['energy_cost_psf'] > 3.0) &
-            (self.properties['energy_star_score'] < 75)
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'optimization',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML Analysis + Domain Rules',
+                'confidence': 0.0
+            }
+        
+        # Find opportunities within filtered set
+        opportunities = filtered_props[
+            (filtered_props['energy_cost_psf'] > 3.0) &
+            (filtered_props['energy_star_score'] < 75)
         ].copy()
         
-        # Calculate potential savings (estimate 20% reduction possible)
+        if len(opportunities) == 0:
+            # If no high-cost properties, show worst performers
+            opportunities = filtered_props.nsmallest(
+                min(5, len(filtered_props)), 'energy_star_score'
+            ).copy()
+        
+        # Calculate potential savings
         opportunities['potential_savings'] = opportunities['energy_cost_annual'] * 0.20
         
-        response = "ENERGY EFFICIENCY OPPORTUNITIES:\n\n"
-        response += f"Found {len(opportunities)} properties with significant energy savings potential\n\n"
+        response = f"ENERGY EFFICIENCY OPPORTUNITIES ({filter_summary}):\n\n"
+        response += f"Analyzed {len(filtered_props)} properties\n"
+        response += f"Found {len(opportunities)} with optimization potential\n\n"
         
         total_savings = opportunities['potential_savings'].sum()
         
-        for _, prop in opportunities.nlargest(5, 'potential_savings').iterrows():
+        for _, prop in opportunities.nlargest(min(5, len(opportunities)), 'potential_savings').iterrows():
             response += f"📍 {prop['property_name']} ({prop['market']})\n"
+            response += f"   Type: {prop['property_type']} | Class: {prop['building_class']}\n"
             response += f"   Current Energy Cost: ${prop['energy_cost_annual']:,.0f}/year "
             response += f"(${prop['energy_cost_psf']:.2f}/sqft)\n"
             response += f"   Energy Star Score: {prop['energy_star_score']}/100\n"
@@ -538,13 +696,13 @@ class IkarisHybridSystem:
             
             response += "\n"
         
-        response += f"\n💰 TOTAL PORTFOLIO SAVINGS OPPORTUNITY: ${total_savings:,.0f}/year\n"
+        response += f"\n💰 TOTAL SAVINGS OPPORTUNITY: ${total_savings:,.0f}/year\n"
         
         return {
             'query': query,
             'type': 'optimization',
             'response': response,
-            'method': 'ML Analysis + Domain Rules',
+            'method': 'ML Analysis with Dynamic Filtering',
             'confidence': 0.90
         }
     
@@ -608,41 +766,78 @@ class IkarisHybridSystem:
         return response
     
     def predict_occupancy_rates(self, query: str) -> Dict[str, Any]:
-        """Predict future occupancy rates"""
+        """Predict future occupancy rates with dynamic filtering"""
         
-        X = self.properties[self.occupancy_features]
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'prediction',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML - Random Forest',
+                'confidence': 0.0
+            }
+        
+        X = filtered_props[self.occupancy_features]
         predictions = self.models['occupancy'].predict(X)
         
-        self.properties['predicted_occupancy'] = predictions
-        self.properties['occupancy_change'] = predictions - self.properties['occupancy_rate']
+        filtered_props['predicted_occupancy'] = predictions
+        filtered_props['occupancy_change'] = predictions - filtered_props['occupancy_rate']
         
-        declining = self.properties[self.properties['occupancy_change'] < -0.05]
+        declining = filtered_props[filtered_props['occupancy_change'] < -0.05]
+        improving = filtered_props[filtered_props['occupancy_change'] > 0.05]
         
-        response = "OCCUPANCY RATE PREDICTIONS (Next 6 Months):\n\n"
+        response = f"OCCUPANCY RATE PREDICTIONS ({filter_summary}):\n\n"
+        response += f"Analyzing {len(filtered_props)} properties\n\n"
         
         if len(declining) > 0:
             response += "⚠️ Properties at Risk of Declining Occupancy:\n\n"
-            for _, prop in declining.nsmallest(5, 'occupancy_change').iterrows():
+            for _, prop in declining.nsmallest(min(5, len(declining)), 'occupancy_change').iterrows():
                 response += f"• {prop['property_name']} ({prop['market']})\n"
+                response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
                 response += f"  Current: {prop['occupancy_rate']:.1%}\n"
                 response += f"  Predicted: {prop['predicted_occupancy']:.1%}\n"
                 response += f"  Change: {prop['occupancy_change']*100:.1f}%\n\n"
+        
+        if len(improving) > 0:
+            response += "📈 Properties Expected to Improve:\n\n"
+            for _, prop in improving.nlargest(min(3, len(improving)), 'occupancy_change').iterrows():
+                response += f"• {prop['property_name']} ({prop['market']})\n"
+                response += f"  Current: {prop['occupancy_rate']:.1%} → "
+                response += f"Predicted: {prop['predicted_occupancy']:.1%}\n"
         
         return {
             'query': query,
             'type': 'prediction',
             'response': response,
-            'method': 'ML - Random Forest',
+            'method': 'ML - Random Forest with Dynamic Filtering',
             'confidence': 0.79
         }
-    
+
     def predict_general_trends(self, query: str) -> Dict[str, Any]:
-        """General trend predictions"""
+        """General trend predictions with dynamic filtering"""
         
-        response = "PORTFOLIO TREND ANALYSIS:\n\n"
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'prediction',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'Statistical Analysis',
+                'confidence': 0.0
+            }
+        
+        response = f"PORTFOLIO TREND ANALYSIS ({filter_summary}):\n\n"
+        response += f"Analyzing {len(filtered_props)} properties\n\n"
         
         # Market trends
-        market_summary = self.properties.groupby('market').agg({
+        market_summary = filtered_props.groupby('market').agg({
             'occupancy_rate': 'mean',
             'base_rent_psf': 'mean',
             'cap_rate': 'mean'
@@ -658,20 +853,35 @@ class IkarisHybridSystem:
             'query': query,
             'type': 'prediction',
             'response': response,
-            'method': 'Statistical Analysis',
+            'method': 'Statistical Analysis with Dynamic Filtering',
             'confidence': 0.75
         }
-    
+
     def assess_maintenance_risk(self, query: str) -> Dict[str, Any]:
-        """Assess maintenance risks"""
+        """Assess maintenance risks with dynamic filtering"""
         
-        high_risk = self.properties[self.properties['maintenance_risk_score'] > 0.7]
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
         
-        response = f"MAINTENANCE RISK ASSESSMENT:\n\n"
-        response += f"Found {len(high_risk)} properties with high maintenance risk\n\n"
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'risk_assessment',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'Risk Scoring Algorithm',
+                'confidence': 0.0
+            }
         
-        for _, prop in high_risk.nlargest(5, 'maintenance_risk_score').iterrows():
-            response += f"• {prop['property_name']}\n"
+        high_risk = filtered_props[filtered_props['maintenance_risk_score'] > 0.7]
+        
+        response = f"MAINTENANCE RISK ASSESSMENT ({filter_summary}):\n\n"
+        response += f"Analyzed {len(filtered_props)} properties\n"
+        response += f"Found {len(high_risk)} with high maintenance risk\n\n"
+        
+        for _, prop in high_risk.nlargest(min(5, len(high_risk)), 'maintenance_risk_score').iterrows():
+            response += f"• {prop['property_name']} ({prop['market']})\n"
+            response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
             response += f"  Risk Score: {prop['maintenance_risk_score']:.2f}\n"
             response += f"  Building Age: {prop['building_age']} years\n"
             response += f"  Annual Maintenance: ${prop['maintenance_annual']:,.0f}\n\n"
@@ -680,28 +890,43 @@ class IkarisHybridSystem:
             'query': query,
             'type': 'risk_assessment',
             'response': response,
-            'method': 'Risk Scoring Algorithm',
+            'method': 'Risk Scoring Algorithm with Dynamic Filtering',
             'confidence': 0.85
         }
-    
+
     def assess_overall_risk(self, query: str) -> Dict[str, Any]:
-        """Overall portfolio risk assessment"""
+        """Overall portfolio risk assessment with dynamic filtering"""
+        
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'risk_assessment',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'Composite Risk Scoring',
+                'confidence': 0.0
+            }
         
         # Calculate composite risk score
-        self.properties['composite_risk'] = (
-            self.properties['maintenance_risk_score'] * 0.25 +
-            self.properties['tenant_risk_score'] * 0.25 +
-            self.properties['market_risk_score'] * 0.25 +
-            self.properties['esg_risk_score'] * 0.25
+        filtered_props['composite_risk'] = (
+            filtered_props['maintenance_risk_score'] * 0.25 +
+            filtered_props['tenant_risk_score'] * 0.25 +
+            filtered_props['market_risk_score'] * 0.25 +
+            filtered_props['esg_risk_score'] * 0.25
         )
         
-        high_risk = self.properties[self.properties['composite_risk'] > 0.6]
+        high_risk = filtered_props[filtered_props['composite_risk'] > 0.6]
         
-        response = "PORTFOLIO RISK ASSESSMENT:\n\n"
+        response = f"PORTFOLIO RISK ASSESSMENT ({filter_summary}):\n\n"
+        response += f"Analyzed {len(filtered_props)} properties\n"
         response += f"High Risk Properties: {len(high_risk)}\n\n"
         
-        for _, prop in high_risk.nlargest(5, 'composite_risk').iterrows():
+        for _, prop in high_risk.nlargest(min(5, len(high_risk)), 'composite_risk').iterrows():
             response += f"• {prop['property_name']} ({prop['market']})\n"
+            response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
             response += f"  Overall Risk: {prop['composite_risk']:.2f}\n"
             response += f"  Key Risks: "
             
@@ -719,85 +944,178 @@ class IkarisHybridSystem:
             'query': query,
             'type': 'risk_assessment',
             'response': response,
-            'method': 'Composite Risk Scoring',
+            'method': 'Composite Risk Scoring with Dynamic Filtering',
             'confidence': 0.83
         }
-    
+
     def identify_value_opportunities(self, query: str) -> Dict[str, Any]:
-        """Identify value optimization opportunities"""
+        """Identify value optimization opportunities with dynamic filtering"""
         
-        # Use the value prediction model
-        X = self.properties[self.value_features]
+        # Use the centralized dynamic filter method
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        # Check if we have any properties after filtering
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'optimization',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'ML Value Analysis',
+                'confidence': 0.0
+            }
+        
+        # Run value predictions on filtered properties
+        X = filtered_props[self.value_features]
         predictions = self.models['value'].predict(X)
         
-        self.properties['predicted_value'] = predictions
-        self.properties['value_opportunity'] = predictions - self.properties['property_value']
-        
-        opportunities = self.properties[self.properties['value_opportunity'] > 0].nlargest(
-            5, 'value_opportunity'
+        filtered_props['predicted_value'] = predictions
+        filtered_props['value_opportunity'] = predictions - filtered_props['property_value']
+        filtered_props['value_opportunity_pct'] = (
+            filtered_props['value_opportunity'] / filtered_props['property_value'] * 100
         )
         
-        response = "VALUE OPTIMIZATION OPPORTUNITIES:\n\n"
+        # Get undervalued properties
+        undervalued = filtered_props[filtered_props['value_opportunity'] > 0]
+        opportunities = undervalued.nlargest(
+            min(5, len(undervalued)), 
+            'value_opportunity'
+        )
         
-        for _, prop in opportunities.iterrows():
-            response += f"• {prop['property_name']} ({prop['market']})\n"
-            response += f"  Current Value: ${prop['property_value']:,.0f}\n"
-            response += f"  Potential Value: ${prop['predicted_value']:,.0f}\n"
-            response += f"  Opportunity: ${prop['value_opportunity']:,.0f}\n"
-            response += f"  Strategy: "
+        if len(opportunities) == 0:
+            response = f"VALUE OPTIMIZATION ANALYSIS ({filter_summary}):\n\n"
+            response += f"No undervalued properties found.\n"
+            response += f"Properties analyzed: {len(filtered_props)}\n"
+            response += f"All properties appear fairly valued or overvalued based on current metrics."
+        else:
+            response = f"VALUE OPTIMIZATION OPPORTUNITIES ({filter_summary}):\n\n"
+            response += f"Found {len(opportunities)} undervalued properties from {len(filtered_props)} analyzed:\n\n"
             
-            if prop['occupancy_rate'] < 0.85:
-                response += "Focus on leasing to increase occupancy\n"
-            elif prop['energy_star_score'] < 75:
-                response += "Energy efficiency improvements\n"
-            else:
-                response += "Rent optimization and expense management\n"
-            
+            for _, prop in opportunities.iterrows():
+                response += f"• {prop['property_name']} ({prop['market']})\n"
+                response += f"  Type: {prop['property_type']} | Class: {prop['building_class']}\n"
+                response += f"  Current Value: ${prop['property_value']:,.0f}\n"
+                response += f"  Predicted Value: ${prop['predicted_value']:,.0f}\n"
+                response += f"  Opportunity: ${prop['value_opportunity']:,.0f} ({prop['value_opportunity_pct']:.1f}%)\n"
+                
+                # Include lease info if relevant to query
+                if 'expir' in query.lower() or 'lease' in query.lower():
+                    response += f"  WALT: {prop['walt_years']:.1f} years\n"
+                
+                response += f"  Occupancy: {prop['occupancy_rate']:.1%}\n"
+                response += f"  Strategy: "
+                
+                if prop['occupancy_rate'] < 0.85:
+                    response += "Focus on leasing to increase occupancy\n"
+                elif prop['energy_star_score'] < 75:
+                    response += "Energy efficiency improvements\n"
+                else:
+                    response += "Rent optimization and expense management\n"
+                
+                response += "\n"
+        
+        return {
+            'query': query,
+            'type': 'optimization',
+            'response': response,
+            'method': 'ML Value Analysis with Dynamic Filtering',
+            'confidence': 0.86 if len(opportunities) > 0 else 0.5
+        }
+
+    def identify_general_opportunities(self, query: str) -> Dict[str, Any]:
+        """Identify general optimization opportunities with dynamic filtering"""
+        
+        # Apply filters first
+        filtered_props, filter_description = self._apply_dynamic_filters(query)
+        filter_summary = " with ".join(filter_description) if filter_description else "All properties"
+        
+        if len(filtered_props) == 0:
+            return {
+                'query': query,
+                'type': 'optimization',
+                'response': f"No properties found matching criteria: {filter_summary}",
+                'method': 'Portfolio Analysis',
+                'confidence': 0.0
+            }
+        
+        response = f"PORTFOLIO OPTIMIZATION OPPORTUNITIES ({filter_summary}):\n\n"
+        response += f"Analyzing {len(filtered_props)} properties\n\n"
+        
+        # Initialize counters
+        opportunities_found = 0
+        
+        # 1. Low occupancy opportunities
+        low_occ = filtered_props[filtered_props['occupancy_rate'] < 0.75]
+        if len(low_occ) > 0:
+            opportunities_found += 1
+            response += f"{opportunities_found}. OCCUPANCY IMPROVEMENT:\n"
+            response += f"   • {len(low_occ)} properties below 75% occupancy\n"
+            potential_revenue = (low_occ['vacant_sqft'] * low_occ['base_rent_psf']).sum()
+            response += f"   • Potential Revenue: ${potential_revenue:,.0f}\n"
+            response += f"   • Top opportunities:\n"
+            for _, prop in low_occ.nsmallest(min(3, len(low_occ)), 'occupancy_rate').iterrows():
+                response += f"     - {prop['property_name']}: {prop['occupancy_rate']:.1%} occupancy\n"
             response += "\n"
         
-        return {
-            'query': query,
-            'type': 'optimization',
-            'response': response,
-            'method': 'ML Value Analysis',
-            'confidence': 0.86
-        }
-    
-    def identify_general_opportunities(self, query: str) -> Dict[str, Any]:
-        """Identify general optimization opportunities"""
-        
-        response = "PORTFOLIO OPTIMIZATION OPPORTUNITIES:\n\n"
-        
-        # Low occupancy opportunities
-        low_occ = self.properties[self.properties['occupancy_rate'] < 0.75]
-        if len(low_occ) > 0:
-            response += f"1. OCCUPANCY IMPROVEMENT: {len(low_occ)} properties below 75%\n"
-            response += f"   Potential Revenue: ${(low_occ['vacant_sqft'] * low_occ['base_rent_psf']).sum():,.0f}\n\n"
-        
-        # Energy efficiency opportunities
-        high_energy = self.properties[
-            (self.properties['energy_cost_psf'] > 3.5) & 
-            (self.properties['energy_star_score'] < 70)
+        # 2. Energy efficiency opportunities
+        high_energy = filtered_props[
+            (filtered_props['energy_cost_psf'] > 3.5) & 
+            (filtered_props['energy_star_score'] < 70)
         ]
         if len(high_energy) > 0:
-            response += f"2. ENERGY EFFICIENCY: {len(high_energy)} properties with high costs\n"
-            response += f"   Potential Savings: ${(high_energy['energy_cost_annual'] * 0.2).sum():,.0f}\n\n"
+            opportunities_found += 1
+            response += f"{opportunities_found}. ENERGY EFFICIENCY:\n"
+            response += f"   • {len(high_energy)} properties with high costs & low efficiency\n"
+            potential_savings = (high_energy['energy_cost_annual'] * 0.2).sum()
+            response += f"   • Potential Savings: ${potential_savings:,.0f}/year\n"
+            response += f"   • Top opportunities:\n"
+            for _, prop in high_energy.nlargest(min(3, len(high_energy)), 'energy_cost_psf').iterrows():
+                response += f"     - {prop['property_name']}: ${prop['energy_cost_psf']:.2f}/sqft, Energy Star {prop['energy_star_score']}\n"
+            response += "\n"
         
-        # Lease renewal opportunities
-        expiring = self.properties[self.properties['walt_years'] < 1]
+        # 3. Lease renewal opportunities
+        expiring = filtered_props[filtered_props['walt_years'] < 1]
         if len(expiring) > 0:
-            response += f"3. LEASE RENEWALS: {len(expiring)} properties with expiring leases\n"
-            response += f"   At Risk Revenue: ${expiring['effective_rental_income'].sum():,.0f}\n\n"
+            opportunities_found += 1
+            response += f"{opportunities_found}. LEASE RENEWALS:\n"
+            response += f"   • {len(expiring)} properties with leases expiring within 1 year\n"
+            at_risk_revenue = expiring['effective_rental_income'].sum()
+            response += f"   • At Risk Revenue: ${at_risk_revenue:,.0f}\n"
+            response += f"   • Urgent attention needed:\n"
+            for _, prop in expiring.nsmallest(min(3, len(expiring)), 'walt_years').iterrows():
+                response += f"     - {prop['property_name']}: {prop['walt_years']:.1f} years WALT\n"
+            response += "\n"
+        
+        # 4. Value optimization opportunities
+        if len(filtered_props) > 0:
+            # Quick value check
+            X = filtered_props[self.value_features]
+            predictions = self.models['value'].predict(X)
+            filtered_props['value_diff'] = predictions - filtered_props['property_value']
+            undervalued = filtered_props[filtered_props['value_diff'] > 0]
+            
+            if len(undervalued) > 0:
+                opportunities_found += 1
+                response += f"{opportunities_found}. VALUE OPTIMIZATION:\n"
+                response += f"   • {len(undervalued)} potentially undervalued properties\n"
+                total_opportunity = undervalued['value_diff'].sum()
+                response += f"   • Total Value Opportunity: ${total_opportunity:,.0f}\n"
+                response += f"   • Top opportunities:\n"
+                for _, prop in undervalued.nlargest(min(3, len(undervalued)), 'value_diff').iterrows():
+                    response += f"     - {prop['property_name']}: ${prop['value_diff']:,.0f} potential\n"
+                response += "\n"
+        
+        if opportunities_found == 0:
+            response += "No significant optimization opportunities identified in the filtered portfolio.\n"
+            response += "Consider expanding search criteria or reviewing property performance metrics.\n"
         
         return {
             'query': query,
             'type': 'optimization',
             'response': response,
-            'method': 'Portfolio Analysis',
-            'confidence': 0.88
+            'method': 'Portfolio Analysis with Dynamic Filtering',
+            'confidence': 0.88 if opportunities_found > 0 else 0.5
         }
-
-
 # Demo and testing
 def demo_hybrid_system():
     """Demonstrate the hybrid system with various queries"""
