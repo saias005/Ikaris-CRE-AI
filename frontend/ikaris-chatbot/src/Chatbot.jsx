@@ -29,6 +29,9 @@ const Chatbot = () => {
     setInput('');
     setIsLoading(true);
 
+    // Track start time for minimum loading display
+    const startTime = Date.now();
+
     try {
       // Replace with your actual API endpoint
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -51,6 +54,14 @@ const Chatbot = () => {
         role: 'assistant',
         content: data.content[0].text
       };
+
+      // Ensure loading indicator shows for at least 1000ms (1 second) to prevent flicker
+      const elapsedTime = Date.now() - startTime;
+      const minDisplayTime = 3000;
+      
+      if (elapsedTime < minDisplayTime) {
+        await new Promise(resolve => setTimeout(resolve, minDisplayTime - elapsedTime));
+      }
 
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
@@ -142,11 +153,7 @@ const Chatbot = () => {
                 <Bot className="avatar-icon" />
               </div>
               <div className="message-bubble assistant-bubble">
-                <div className="loading-dots">
-                  <div className="dot dot1"></div>
-                  <div className="dot dot2"></div>
-                  <div className="dot dot3"></div>
-                </div>
+                <div className="loading-text">...</div>
               </div>
             </div>
           )}
