@@ -101,7 +101,7 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
-  z-index: 5;
+  z-index: 10;
 }
 
 .input-section.input-center {
@@ -119,6 +119,8 @@ html, body, #root {
   width: 100%;
   transform: translateY(0);
   padding: 1.5rem;
+  background: linear-gradient(to top, #1a3a0f 60%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 .input-wrapper {
@@ -195,11 +197,13 @@ html, body, #root {
 /* Messages Container Styles with Animation */
 .messages-container {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 2rem 1rem;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   transition: all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+  position: relative;
 }
 
 .messages-container.messages-collapsed {
@@ -207,13 +211,15 @@ html, body, #root {
   opacity: 0;
   max-height: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 .messages-container.messages-expanded {
   flex: 1;
   opacity: 1;
   max-height: 100%;
-  padding-bottom: 8rem;
+  padding: 2rem 1rem 10rem 1rem;
+  margin-bottom: 0;
 }
 
 .messages-wrapper {
@@ -287,10 +293,12 @@ html, body, #root {
 
 /* Message Bubble Styles */
 .message-bubble {
-  max-width: 70%;
+  max-width: 85%;
   border-radius: 1rem;
   padding: 1rem 1.25rem;
   transition: all 0.3s ease;
+  overflow-x: auto;
+  word-wrap: break-word;
 }
 
 .message-bubble:hover {
@@ -328,7 +336,7 @@ html, body, #root {
   height: 0.5rem;
   background-color: #a0aec0;
   border-radius: 50%;
-  animation: bounce 1.4s infinite ease-in-out;
+  animation: bounce 1.0s infinite ease-in-out;
 }
 
 .dot1 {
@@ -419,3 +427,260 @@ html, body, #root {
     font-size: 1.1rem;
   }
 }
+
+/* Markdown Content Styles */
+.markdown-content {
+  line-height: 1.25;
+  font-size: clamp(0.875rem, 2vw, 1rem);
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-weight: 700;
+  color: inherit;
+  line-height: 1.15;
+}
+
+.markdown-content h1 {
+  font-size: 1.5em;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 0.2rem;
+}
+
+.markdown-content h2 {
+  font-size: 1.3em;
+}
+
+.markdown-content h3 {
+  font-size: 1.1em;
+}
+
+.markdown-content h4 {
+  font-size: 1em;
+}
+
+.markdown-content p {
+  margin-bottom: 0.15rem;
+  line-height: 1.25;
+  margin-top: 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.2rem;
+  margin-top: 0.05rem;
+  padding-left: 0;
+  list-style-position: outside;
+}
+
+.markdown-content li {
+  margin-bottom: 0.05rem;
+  line-height: 1.25;
+  padding-left: 0.25rem;
+  display: list-item;
+}
+
+.markdown-content li > * {
+  display: inline;
+}
+
+.markdown-content li strong {
+  display: inline;
+}
+
+.markdown-content strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+.markdown-content code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 1em;
+  color: inherit;
+}
+
+.markdown-content pre {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  overflow-x: auto;
+  margin-bottom: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid rgba(0, 0, 0, 0.2);
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-bottom: 0.5rem;
+  margin-top: 0.5rem;
+  font-style: italic;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 0.85em;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.markdown-content table tbody,
+.markdown-content table thead {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.markdown-content thead {
+  background: linear-gradient(135deg, rgba(26, 58, 15, 0.9) 0%, rgba(26, 58, 15, 0.7) 100%);
+}
+
+.markdown-content th {
+  border: none;
+  padding: 0.85rem 0.75rem;
+  text-align: left;
+  font-weight: 700;
+  color: white;
+  text-transform: uppercase;
+  font-size: 0.75em;
+  letter-spacing: 0.03em;
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.3;
+  min-height: 3em;
+  vertical-align: middle;
+}
+
+.markdown-content th:last-child {
+  border-right: none;
+}
+
+.markdown-content tbody tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s ease;
+}
+
+.markdown-content tbody tr:hover {
+  background-color: rgba(26, 58, 15, 0.08);
+}
+
+.markdown-content tbody tr:last-child {
+  border-bottom: none;
+}
+
+.markdown-content tbody tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.markdown-content tbody tr:nth-child(even):hover {
+  background-color: rgba(26, 58, 15, 0.12);
+}
+
+.markdown-content td {
+  border: none;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  color: inherit;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  font-size: 0.9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.markdown-content td:last-child {
+  border-right: none;
+}
+
+/* Make numbers in tables stand out */
+.markdown-content td:has(strong),
+.markdown-content td strong {
+  font-weight: 700;
+  color: #1a3a0f;
+}
+
+.markdown-content a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.markdown-content a:hover {
+  color: #1d4ed8;
+}
+
+/* Dark text for assistant bubble markdown */
+.assistant-bubble .markdown-content {
+  color: #1a202c;
+}
+
+.assistant-bubble .markdown-content strong {
+  color: #0f1419;
+}
+
+/* Ensure first and last elements have proper margins */
+.markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-content > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Responsive table styles for mobile */
+@media (max-width: 768px) {
+  .markdown-content table {
+    font-size: 0.75em;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    padding: 0.5rem 0.5rem;
+    font-size: 0.85em;
+  }
+
+  .markdown-content th {
+    font-size: 0.7em;
+  }
+
+  .message-bubble {
+    max-width: 90%;
+  }
+}
+
+/* Table wrapper for better mobile scrolling */
+.markdown-content table {
+  max-width: 100%;
+}
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .message-bubble {
+    max-width: 80%;
+  }
+}
+

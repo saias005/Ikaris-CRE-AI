@@ -323,6 +323,13 @@ class IkarisHybridSystem:
         
         query_lower = query.lower()
         
+         # Check for conversational/chat queries FIRST
+        chat_keywords = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 
+                        'how are you', 'thank you', 'thanks', 'what can you do',
+                        'help me', 'your capabilities', 'introduce yourself']
+        
+        if any(keyword in query_lower for keyword in chat_keywords):
+            return 'chat'
         # ML Prediction triggers
         ml_predict_keywords = ['predict', 'forecast', 'will', 'future', 'next quarter', 
                                'next year', 'projection', 'estimate', 'expect']
@@ -358,7 +365,9 @@ class IkarisHybridSystem:
         
         print(f"Query type identified: {query_type}")
         
-        if query_type == 'rag':
+        if query_type == 'chat':
+            return self.handle_chat_query(query)  
+        elif query_type == 'rag':
             return self.handle_rag_query(query)
         elif query_type == 'ml_predict':
             return self.handle_prediction_query(query)
@@ -366,7 +375,70 @@ class IkarisHybridSystem:
             return self.handle_risk_query(query)
         elif query_type == 'ml_optimize':
             return self.handle_optimization_query(query)
-    
+
+    def handle_chat_query(self, query: str) -> Dict[str, Any]:
+        """Handle conversational queries"""
+
+        query_lower = query.lower()
+        
+        # Prepare friendly responses
+        if 'hello' in query_lower or 'hi' in query_lower or 'hey' in query_lower:
+            response = """Hello! I'm IKARIS, your commercial real estate intelligence assistant. I'm here to help you with:
+
+- Property value predictions and market analysis
+- Risk assessments and maintenance forecasting
+- Energy efficiency opportunities
+- Portfolio optimization recommendations
+- Searching through your property documents and data
+
+What would you like to explore today?"""
+        
+        elif 'how are you' in query_lower:
+            response = """I'm functioning optimally and ready to assist with your CRE needs! I have access to your full property portfolio data and can provide insights on values, risks, and optimization opportunities. How can I help you today?"""
+        
+        elif 'thank' in query_lower:
+            response = """You're welcome! Is there anything else about your property portfolio I can help you analyze?"""
+        
+        elif 'what can you do' in query_lower or 'capabilities' in query_lower or 'help' in query_lower:
+            response = """I can help you with a wide range of commercial real estate analysis:
+
+**Predictive Analytics:**
+- Forecast property values and maintenance costs
+- Predict occupancy rates and lease renewal risks
+
+**Risk Assessment:**
+- Identify properties at risk of tenant loss
+- Assess maintenance and operational risks
+- Evaluate portfolio-wide risk exposure
+
+**Optimization:**
+- Find undervalued properties
+- Identify energy efficiency opportunities
+- Recommend portfolio optimization strategies
+
+**Smart Search:**
+- Search through your property documents
+- Find specific properties by criteria (location, type, class, etc.)
+- Analyze market trends from your documents
+
+Try asking me something like:
+- "Which properties in Dallas have high energy costs?"
+- "Predict maintenance costs for next year"
+- "Find undervalued office properties in Houston"
+
+What would you like to know?"""
+        
+        else:
+            response = """I'm here to help with your commercial real estate analysis. Feel free to ask me about property values, risks, optimization opportunities, or any specific properties in your portfolio. What would you like to know?"""
+        
+        return {
+            'query': query,
+            'type': 'chat',
+            'response': response,
+            'method': 'Conversational Response'
+        }
+
+
     def handle_rag_query(self, query: str, vectorstore=None) -> Dict[str, Any]:
         """
         Handle factual queries with BOTH vector search AND CSV filtering
@@ -1159,7 +1231,6 @@ def demo_hybrid_system():
         if 'confidence' in result:
             print(f"Confidence: {result['confidence']:.1%}")
         print(f"\nResponse:\n{result['response'][:500]}...")  # Truncate for display
-
 
 if __name__ == "__main__":
     demo_hybrid_system()

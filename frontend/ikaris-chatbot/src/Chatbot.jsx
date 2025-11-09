@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './Chatbot.css';
 import wingsLogo from './wings-logo.png';
 
@@ -30,26 +32,25 @@ const Chatbot = () => {
     setIsLoading(true);
 
     try {
-      // Replace with your actual API endpoint
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      // Call IKARIS backend API
+      const response = await fetch('http://localhost:5001/api/hybrid_query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [...messages, userMessage].map(msg => ({
-            role: msg.role,
-            content: msg.content
-          }))
+          question: userMessage.content
         })
       });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
 
       const data = await response.json();
       const assistantMessage = {
         role: 'assistant',
-        content: data.content[0].text
+        content: data.answer || data.response || 'No response received.'
       };
 
       setMessages(prev => [...prev, assistantMessage]);
@@ -57,7 +58,7 @@ const Chatbot = () => {
       console.error('Error:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.'
+        content: 'Sorry, I encountered an error connecting to IKARIS. Please make sure the backend server is running on port 5001.'
       }]);
     } finally {
       setIsLoading(false);
@@ -128,9 +129,17 @@ const Chatbot = () => {
 
               {/* Message Bubble */}
               <div className={`message-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}>
-                <p className="message-text">
-                  {message.content}
-                </p>
+                {message.role === 'assistant' ? (
+                  <div className="message-text markdown-content">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="message-text">
+                    {message.content}
+                  </p>
+                )}
               </div>
             </div>
           ))}
