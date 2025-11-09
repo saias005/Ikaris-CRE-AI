@@ -1,14 +1,25 @@
 import pdfplumber
 from pathlib import Path
 from typing import List, Dict, Optional, Union
+import warnings
 import os
 
+warnings.filterwarnings("ignore")
+
 def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extracts text from a PDF file."""
+    """Extract text from PDF including chart descriptions"""
     text = ""
+    
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() or ""
+        for page_num, page in enumerate(pdf.pages):
+            # Extract text
+            page_text = page.extract_text() or ""
+            text += page_text
+            
+            # Note presence of charts/images
+            if page.images:
+                text += f"\n[Note: Page {page_num + 1} contains {len(page.images)} chart(s)/image(s)]\n"
+    
     return text
 
 def process_all_pdfs(pdf_folder: Optional[Union[str, Path]] = None) -> List[Dict]:
