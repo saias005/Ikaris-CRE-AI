@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Chatbot.css';
 import wingsLogo from './wings-logo.png';
+import config from './config';
 
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
@@ -33,14 +34,12 @@ const Chatbot = () => {
 
     try {
       // Call IKARIS backend API
-      const response = await fetch('http://localhost:5001/api/hybrid_query', {
+      const response = await fetch(`${config.API_URL}/api/hybrid_query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          question: userMessage.content
-        })
+        body: JSON.stringify({ question: input })
       });
 
       if (!response.ok) {
@@ -123,7 +122,7 @@ const Chatbot = () => {
                 {message.role === 'user' ? (
                   <User className="avatar-icon" />
                 ) : (
-                  <Bot className="avatar-icon" />
+                  <img src={wingsLogo} alt="IKARIS" className="avatar-icon" />
                 )}
               </div>
 
@@ -148,7 +147,7 @@ const Chatbot = () => {
           {isLoading && (
             <div className="message-row assistant-message">
               <div className="avatar assistant-avatar">
-                <Bot className="avatar-icon" />
+                <img src={wingsLogo} alt="IKARIS" className="avatar-icon" />
               </div>
               <div className="message-bubble assistant-bubble">
                 <div className="loading-dots">

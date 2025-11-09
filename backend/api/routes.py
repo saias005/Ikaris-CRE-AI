@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -6,6 +6,7 @@ from openai import OpenAI
 import os
 import sys
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Fix the import path - add backend directory to Python path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +17,10 @@ from agents.hybrid_sys import IkarisHybridSystem
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, 
+            static_folder='../../frontend/ikaris-chatbot/build',
+            static_url_path='')
+
 CORS(app)
 
 print("🚀 Loading IKARIS - CRE Intelligence OS...")
@@ -465,22 +469,56 @@ def hybrid_query():
         })
 
 
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    """Serve React app - catch all routes"""
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
+
 if __name__ == '__main__':
     print("\n" + "="*70)
     print("🏢 IKARIS - CRE Intelligence OS")
-    print("   Commercial Real Estate Analysis with Mistral-Nemotron")
+    print("   Unified Deployment - Frontend + Backend")
     print("="*70)
-    print("📍 API Server: http://localhost:5000")
-    print("\n📖 Endpoints:")
+    print("🌐 Access the full app at: http://localhost:5001")
+    print("\n📖 API Endpoints (for direct access):")
     print("   • GET  /api/health        - System health check")
     print("   • POST /api/query         - Ask IKARIS a question (RAG)")
     print("   • POST /api/hybrid_query  - Hybrid RAG + ML query")
     print("   • POST /api/search        - Search documents (no LLM)")
     print("   • GET  /api/documents     - List all indexed documents")
     print("="*70)
-    print(f"📊 Status: {vectorstore._collection.count()} chunks indexed and ready")
-    print("🤖 Model: Mistral-Nemotron (128K context)")
+    
+    # Status summary
+    if vectorstore:
+        print(f"📊 Vector DB: {vectorstore._collection.count()} chunks indexed")
+    else:
+        print("⚠️  Vector DB: Not loaded")
+    
+    if nemotron_client:
+        print("🤖 Model: Mistral-Nemotron (128K context)")
+    else:
+        print("⚠️  Model: Nemotron not available")
+    
+    if hybrid_system:
+        print("🧠 ML System: Ready with all models")
+    else:
+        print("⚠️  ML System: Not available")
+    
+    # Check if React build exists
+    import os
+    react_build_path = os.path.join(os.path.dirname(__file__), '../../frontend/build')
+    if os.path.exists(react_build_path):
+        print("✅ Frontend: React build found - serving at /")
+    else:
+        print("⚠️  Frontend: No React build found - run 'npm run build' in frontend/")
+        print("    API-only mode active")
+    
     print("="*70)
-    print("\n✅ IKARIS is online and ready for queries!\n")
+    print("\n✅ IKARIS is online and ready!\n")
+    print("👉 Open http://localhost:5001 in your browser\n")
     
     app.run(debug=True, port=5001, host='0.0.0.0')
