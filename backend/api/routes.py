@@ -131,48 +131,20 @@ def query_with_ikaris(question: str, k: int = 5):
     print(f"✅ Found {len(relevant_docs)} relevant chunks")
     print(f"📄 Context length: {len(context)} characters")
     
-    # Step 3: Create user prompt
-    user_prompt = f"""**Context from CBRE Documents:**
-
-    def polish_with_ikaris(question: str, raw_analysis: str) -> str:
-    """
-    Use Nemotron to rewrite/generate a well-structured answer from
-    an internal analysis string (e.g., ML output).
-    """
-    user_prompt = f"""You are IKARIS, a CRE analyst.
-
-User question:
-{question}
-
-Internal analysis (from IKARIS tools/ML models):
-{raw_analysis}
-
-Rewrite this into a clear, decision-ready answer following the IKARIS output template:
-- Executive Summary
-- Key Findings (with numbers/units)
-- Limitations & Assumptions
-- Sources (you can say 'Internal IKARIS model outputs' if there are no documents)
-- Confidence
-"""
-
-    resp = nemotron_client.chat.completions.create(
-        model="mistralai/mistral-nemotron",
-        messages=[
-            {"role": "system", "content": IKARIS_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.3,
-        max_tokens=1500
-    )e
-
-    return resp.choices[0].message.content
-    
-
-{context}
+    # Step 3: Create user prompt (include the assembled context and the user's question)
+    user_prompt = f"""{context}
 
 **User Question:** {question}
 
-Please analyze the provided CBRE documents and answer the question following the IKARIS output template. Include specific data points with units (psf, %, $) and cite sources with document names."""
+Please analyze the provided CBRE documents and answer the question following the IKARIS output template:
+- Executive Summary (2–4 sentences)
+- Key Findings (with numbers/units)
+- Limitations & Assumptions
+- Sources (cite document name and chunk)
+- Confidence (High/Medium/Low)
+
+Only use information present in the provided context and clearly state any missing information or assumptions.
+"""
 
     # Step 4: Call IKARIS (Nemotron)
     print("🤖 IKARIS generating response...")
@@ -414,7 +386,7 @@ if __name__ == '__main__':
     print("🏢 IKARIS - CRE Intelligence OS")
     print("   Commercial Real Estate Analysis with Mistral-Nemotron")
     print("="*70)
-    print("📍 API Server: http://localhost:5000")
+    print("📍 API Server: http://localhost:3001")
     print("\n📖 Endpoints:")
     print("   • GET  /api/health     - System health check")
     print("   • POST /api/query      - Ask IKARIS a question (RAG)")
@@ -426,4 +398,4 @@ if __name__ == '__main__':
     print("="*70)
     print("\n✅ IKARIS is online and ready for queries!\n")
     
-    app.run(debug=True, port=5001, host='0.0.0.0')
+    app.run(debug=True, port=3001, host='0.0.0.0')

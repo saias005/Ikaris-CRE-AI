@@ -34,28 +34,19 @@ const Chatbot = () => {
 
     try {
       // Replace with your actual API endpoint
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('http://localhost:3001/api/query', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [...messages, userMessage].map(msg => ({
-            role: msg.role,
-            content: msg.content
-          }))
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: input })
       });
 
       const data = await response.json();
       const assistantMessage = {
-        role: 'assistant',
-        content: data.content[0].text
+          role: 'assistant',
+          content: data.answer || 'Sorry, no answer returned.'
       };
 
-      // Ensure loading indicator shows for at least 1000ms (1 second) to prevent flicker
+      // Ensure loading indicator shows for at least 3000ms (3 seconds) to prevent flicker
       const elapsedTime = Date.now() - startTime;
       const minDisplayTime = 3000;
       
@@ -68,7 +59,7 @@ const Chatbot = () => {
       console.error('Error:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.'
+        content: '⚠️ Sorry, I encountered an error connecting to the backend. Please ensure the Flask server is running on port 3001.\n\nError: ' + error.message
       }]);
     } finally {
       setIsLoading(false);

@@ -23,6 +23,7 @@ Use Case: "What should this property be worth?"
 """
 
 from sklearn.ensemble import RandomForestRegressor
+import numpy as np
 import xgboost as xgb
 
 def train_property_value_model(df):
@@ -335,6 +336,15 @@ class MLPredictionHandler:
     
     def predict_values(self):
         """Predict which properties are under/over valued"""
+        
+        # Define features used by the trained property value model
+        features = ['total_sqft', 'building_age', 'occupancy_rate', 
+                    'noi_annual', 'cap_rate', 'energy_star_score']
+        
+        # Ensure properties has required columns
+        missing = [f for f in features if f not in self.properties.columns]
+        if missing:
+            raise KeyError(f"Missing required feature columns for prediction: {missing}")
         
         # Get predictions
         predicted_values = self.models['value'].predict(self.properties[features])
