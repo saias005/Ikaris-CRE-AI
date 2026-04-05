@@ -1,4 +1,35 @@
+# ── Environment / Secrets ─────────────────────────────────────────────────────
 .env
-*.env
 .env.local
 .env.*.local
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# ── ChromaDB (rebuilt on first run — don't commit binary blobs) ───────────────
+backend/chroma_db/*/
+
+# ── Node / React ──────────────────────────────────────────────────────────────
+node_modules/
+frontend/ikaris-chatbot/build/
+frontend/ikaris-chatbot/.env.local
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
